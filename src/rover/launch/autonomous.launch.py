@@ -77,6 +77,10 @@ def generate_launch_description():
     )
 
     # ── NVIDIA Brain Node (t=22s) ─────────────────────────────────────────────
+    import site
+    user_site = site.getusersitepackages()
+    pythonpath_val = f"{user_site}:/home/vishal/.local/lib/python3.12/site-packages:{os.environ.get('PYTHONPATH', '')}"
+
     brain_node = Node(
         package='rover',
         executable='nvidia_brain',
@@ -90,11 +94,7 @@ def generate_launch_description():
             }
         ],
         additional_env={
-            # Ensure openai (installed to user dir) is importable
-            'PYTHONPATH': (
-                '/home/vishal/.local/lib/python3.12/site-packages:'
-                + os.environ.get('PYTHONPATH', '')
-            ),
+            'PYTHONPATH': pythonpath_val,
         },
     )
 
@@ -106,10 +106,7 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(enable_voice),
         additional_env={
-            'PYTHONPATH': (
-                '/home/vishal/.local/lib/python3.12/site-packages:'
-                + os.environ.get('PYTHONPATH', '')
-            ),
+            'PYTHONPATH': pythonpath_val,
         },
     )
 

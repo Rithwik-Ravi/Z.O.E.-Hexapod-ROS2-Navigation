@@ -115,12 +115,16 @@ def generate_launch_description():
         }]
     )
 
-    # 3. Static TF: odom -> base_footprint
+    # 3. Static TF: odom -> base_footprint (ROS 2 Jazzy standard syntax)
     static_odom_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='static_odom_broadcaster',
-        arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_footprint'],
+        arguments=[
+            '--x', '0', '--y', '0', '--z', '0',
+            '--yaw', '0', '--pitch', '0', '--roll', '0',
+            '--frame-id', 'odom', '--child-frame-id', 'base_footprint'
+        ],
         output='screen'
     )
 

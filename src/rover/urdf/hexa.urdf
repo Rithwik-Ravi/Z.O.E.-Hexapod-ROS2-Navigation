@@ -1142,7 +1142,6 @@
     <ros2_control name="HexaSystem" type="system">
   <hardware>
     <plugin>gz_ros2_control/GazeboSimSystem</plugin>
-    <plugin>gazebo_ros2_control/GazeboSystem</plugin>
   </hardware>
 
   <!-- Repeat for ALL joints -->

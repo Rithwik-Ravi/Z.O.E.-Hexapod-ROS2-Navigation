@@ -18,6 +18,7 @@ setup(
         (os.path.join('share', package_name, 'meshes'), glob('meshes/*.stl')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
         (os.path.join('share', package_name, 'config'), glob('config/*.rviz')),
+        (os.path.join('share', package_name, 'maps'), glob('maps/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -43,10 +44,10 @@ setup(
             'hxp_nav_ctrl = rover.hexapod_nav_controller:main',
             'odom_from_tf = rover.odom_from_tf:main',
             # ── Autonomous Brain Stack ─────────────────────────────────────
-            'sensor_bridge   = rover.sensor_bridge_node:main',
+            'sensor_bridge = rover.sensor_bridge_node:main',
             'tool_dispatcher = rover.tool_dispatcher_node:main',
-            'nvidia_brain    = rover.nvidia_brain_node:main',
-            'voice_bridge    = rover.voice_bridge_node:main',
+            'nvidia_brain = rover.nvidia_brain_node:main',
+            'voice_bridge = rover.voice_bridge_node:main',
         ],
     },
 )

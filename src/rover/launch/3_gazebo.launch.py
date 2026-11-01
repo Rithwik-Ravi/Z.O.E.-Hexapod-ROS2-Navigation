@@ -76,9 +76,12 @@ def generate_launch_description():
     )
 
     # RViz2
+    rviz_config = os.path.join(pkg_dir, 'config', 'view_robot.rviz')
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
+        name='rviz2',
+        arguments=['-d', rviz_config],
         output='screen',
         parameters=[{'use_sim_time': True}]
     )
