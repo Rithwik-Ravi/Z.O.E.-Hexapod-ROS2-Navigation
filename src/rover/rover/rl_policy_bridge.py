@@ -118,6 +118,7 @@ class NumpyMLPPolicy:
     """Lightweight inference wrapper for Z.O.E. `policy_mlp.npz` exports."""
 
     def __init__(self, npz_path: str):
+        """Load observation normalizer stats and MLP layer weights from `.npz`."""
         data = np.load(npz_path, allow_pickle=False)
         self.files = list(data.files)
         self.mean = data['obs_mean'].astype(np.float32) if 'obs_mean' in data else np.zeros(63, dtype=np.float32)
@@ -131,6 +132,7 @@ class NumpyMLPPolicy:
             raise ValueError(f'No weight tensors (w0/b0...) found in {npz_path}: {self.files}')
 
     def __call__(self, obs: np.ndarray) -> np.ndarray:
+        """Run a forward pass on a 63-D observation and return clipped `[-1, 1]` actions."""
         x = (obs - self.mean) / np.maximum(self.std, 1e-6)
         for i, (w, b) in enumerate(self.layers):
             x = x @ w.T + b if w.shape[1] == x.shape[0] else x @ w + b

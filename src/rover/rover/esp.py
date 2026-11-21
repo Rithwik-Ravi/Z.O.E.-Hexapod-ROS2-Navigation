@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 esp.py — ESP32 Serial Hardware Bridge for 18-DOF Hexapod Servos.
 
 Subscribes to `/hexapod_controller/joint_trajectory` (`trajectory_msgs/msg/JointTrajectory`),
