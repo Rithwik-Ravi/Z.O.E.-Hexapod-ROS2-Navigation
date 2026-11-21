@@ -11,18 +11,19 @@ Usage:
 """
 
 import os
-import sys
-import time
-import threading
+import site
 import subprocess
+import sys
 import tempfile
+import threading
+import time
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
-# Ensure SpeechRecognition from user site-packages is importable
-USER_SITE = '/home/vishal/.local/lib/python3.12/site-packages'
+# Ensure user-installed SpeechRecognition resolves cleanly in ROS 2 launch env
+USER_SITE = site.getusersitepackages()
 if os.path.isdir(USER_SITE) and USER_SITE not in sys.path:
     sys.path.insert(0, USER_SITE)
 

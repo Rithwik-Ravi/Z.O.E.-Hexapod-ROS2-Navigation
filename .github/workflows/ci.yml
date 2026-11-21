@@ -1,0 +1,60 @@
+name: ROS 2 CI (Build, Lint & Unit Tests)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ros_distro: humble
+            container: ros:humble-ros-base
+          - ros_distro: jazzy
+            container: ros:jazzy-ros-base
+
+    runs-on: ubuntu-24.04
+    container:
+      image: ${{ matrix.container }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build & Python test dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-pip python3-pytest python3-flake8 \
+            python3-colcon-common-extensions \
+            python3-opencv python3-numpy python3-serial python3-yaml \
+            ros-${{ matrix.ros_distro }}-ament-cmake \
+            ros-${{ matrix.ros_distro }}-ament-cmake-ros \
+            ros-${{ matrix.ros_distro }}-rosidl-default-generators \
+            ros-${{ matrix.ros_distro }}-cv-bridge \
+            ros-${{ matrix.ros_distro }}-tf2-ros \
+            ros-${{ matrix.ros_distro }}-tf2-geometry-msgs
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Build workspace with colcon
+        run: |
+          source /opt/ros/${{ matrix.ros_distro }}/setup.bash
+          colcon build --symlink-install
+
+      - name: Run unit tests (pytest)
+        run: |
+          source /opt/ros/${{ matrix.ros_distro }}/setup.bash
+          source install/setup.bash
+          python3 -m pytest -v src/rover/test/
+
+      - name: Lint Python nodes (flake8)
+        run: |
+          python3 -m flake8 src/rover/rover/rl_policy_bridge.py src/rover/rover/sim_compat.py src/rover/rover/odom_from_tf.py src/rover/rover/hxp_command.py src/rover/rover/esp.py src/rover/test/

@@ -7,12 +7,13 @@ and Zoe will transcribe your voice, send it to the brain, and speak back!
 """
 
 import os
-import sys
+import site
 import subprocess
+import sys
 import tempfile
 import time
 
-USER_SITE = '/home/vishal/.local/lib/python3.12/site-packages'
+USER_SITE = site.getusersitepackages()
 if os.path.isdir(USER_SITE) and USER_SITE not in sys.path:
     sys.path.insert(0, USER_SITE)
 

@@ -1,235 +1,146 @@
 #!/usr/bin/env python3
+"""
+esp.py — ESP32 Serial Hardware Bridge for 18-DOF Hexapod Servos.
+
+Subscribes to `/hexapod_controller/joint_trajectory` (`trajectory_msgs/msg/JointTrajectory`),
+converts the 18 joint angles from radians to calibrated servo degrees `[0.0, 180.0]`,
+and streams space-separated ASCII frames (`"a1 a2 ... a18\\n"`) over USB serial at
+115200 baud to the onboard ESP32 servo controller.
+"""
+
+import math
+from typing import List
 
 import rclpy
 from rclpy.node import Node
+import serial
 from trajectory_msgs.msg import JointTrajectory
 
-import serial
-import math
+
+# Calibrated neutral J1 atan2(x, y) angles (deg) matching `hxp_command.py` stance
+J1_NEUTRAL_DEG = {
+    1: 45.0,
+    2: math.degrees(math.atan2(55.0, 80.0)),
+    3: math.degrees(math.atan2(80.0, 55.0)),
+    4: 45.0,
+    5: math.degrees(math.atan2(55.0, 80.0)),
+    6: math.degrees(math.atan2(80.0, 55.0)),
+}
+
+
+def positions_rad_to_servo_deg(positions_rad: List[float]) -> List[float]:
+    """
+    Convert 18 leg-grouped joint positions (radians) to calibrated servo degrees `[0, 180]`.
+
+    Joint ordering: `[NCCUP1, NTHIGH1, NFOOT1, ..., NCCUP6, NTHIGH6, NFOOT6]`.
+    Leg 3 thigh/foot servos are inverted (`90 - deg`) to match physical horn mounting.
+    """
+    if len(positions_rad) != 18:
+        raise ValueError(f'Expected 18 joint positions, got {len(positions_rad)}')
+
+    angles_deg: List[float] = []
+    for i, pos_rad in enumerate(positions_rad):
+        angle_deg = math.degrees(pos_rad)
+        leg_id = (i // 3) + 1
+        joint_type = i % 3
+
+        if joint_type == 0:
+            # Coxa (J1): center physical 90 deg around calibrated leg neutral angle
+            servo_deg = 90.0 + (angle_deg - J1_NEUTRAL_DEG[leg_id])
+        elif leg_id == 3 and joint_type in (1, 2):
+            # Leg 3 thigh/foot servo orientation is mechanically mirrored
+            servo_deg = 90.0 - angle_deg
+        else:
+            servo_deg = 90.0 + angle_deg
+
+        servo_deg = max(0.0, min(180.0, servo_deg))
+        angles_deg.append(round(servo_deg, 2))
+    return angles_deg
 
 
 class ESPBridge(Node):
+    """Streams calibrated 18-servo degree commands to an ESP32 over USB serial."""
 
     def __init__(self):
-        super().__init__("esp_bridge")
+        super().__init__('esp_bridge')
 
-        # -------- SERIAL PARAMETERS --------
-        self.declare_parameter("port", "/dev/ttyUSB1")
-        self.declare_parameter("baud", 115200)
+        self.declare_parameter('port', '/dev/ttyUSB0')
+        self.declare_parameter('baud', 115200)
 
-        self.port = self.get_parameter("port").get_parameter_value().string_value
-        self.baud = self.get_parameter("baud").get_parameter_value().integer_value
+        self.port = self.get_parameter('port').get_parameter_value().string_value
+        self.baud = self.get_parameter('baud').get_parameter_value().integer_value
+        self.ser = None
 
         self.connect_serial()
 
-        # -------- SUBSCRIBE --------
         self.sub = self.create_subscription(
             JointTrajectory,
-            "/hexapod_controller/joint_trajectory",
+            '/hexapod_controller/joint_trajectory',
             self.callback,
-            10
+            10,
         )
 
-        self.get_logger().info("ESP Bridge (FINAL - RAW ANGLES) Started")
+        self.get_logger().info(f'ESP32 Hardware Bridge started on {self.port} @ {self.baud} baud')
 
-    # -------- SERIAL CONNECT --------
     def connect_serial(self):
+        """Open the USB serial connection to the ESP32 controller."""
         try:
             self.ser = serial.Serial(self.port, self.baud, timeout=1)
-            self.get_logger().info(f"Connected to {self.port}")
-        except Exception as e:
-            self.get_logger().error(f"Serial connection failed: {e}")
+            self.get_logger().info(f'Connected to {self.port}')
+        except Exception as exc:
+            self.get_logger().error(f'Serial connection failed on {self.port}: {exc}')
             self.ser = None
 
-    # -------- SAFE WRITE --------
-    def send_data(self, data):
+    def send_data(self, data: str):
+        """Write an ASCII servo frame to serial, attempting reconnect on failure."""
         if self.ser is None:
             self.connect_serial()
             return
 
         try:
             self.ser.write(data.encode())
-        except Exception as e:
-            self.get_logger().warn(f"Serial error: {e}")
+        except Exception as exc:
+            self.get_logger().warn(f'Serial write error: {exc}')
             try:
                 self.ser.close()
-            except:
+            except Exception:
                 pass
             self.ser = None
 
-    # -------- CALLBACK --------
-    def callback(self, msg):
-
+    def callback(self, msg: JointTrajectory):
+        """Convert incoming 18-joint trajectory point to degrees and transmit."""
         if not msg.points:
             return
 
         positions = msg.points[0].positions
-
-        # -------- EXPECT EXACTLY 18 --------
         if len(positions) != 18:
-            self.get_logger().warn(f"Expected 18 joints, got {len(positions)}")
+            self.get_logger().warn(f'Expected 18 joints, got {len(positions)}')
             return
 
-        # -------- RAD → DEG ONLY --------
-        #angles_deg = [round(math.degrees(p), 2) for p in positions]
-        angles_deg = []
-
-        # Calibrated neutral J1 atan2(x, y) angles from hxp_command gaits:
-        # Legs 1 & 4: 45.0 deg | Legs 2 & 5: ~34.51 deg | Legs 3 & 6: ~55.49 deg
-        j1_neutral = {
-            1: 45.0,
-            2: math.degrees(math.atan2(55.0, 80.0)),
-            3: math.degrees(math.atan2(80.0, 55.0)),
-            4: 45.0,
-            5: math.degrees(math.atan2(55.0, 80.0)),
-            6: math.degrees(math.atan2(80.0, 55.0)),
-        }
-
-        for i in range(18):
-            angle_deg = math.degrees(positions[i])
-            leg_id = (i // 3) + 1
-            joint_type = i % 3
-
-            if joint_type == 0:       # J1 (Coxa) — center precisely at 90 deg neutral
-                servo_deg = 90.0 + (angle_deg - j1_neutral[leg_id])
-            else:                     # J2, J3
-                servo_deg = 90.0 + angle_deg
-
-            # safety clamp to 0 - 180 degrees
-            servo_deg = max(0.0, min(180.0, servo_deg))
-            angles_deg.append(round(servo_deg, 2))
-
-        # -------- FORMAT --------
-        data = " ".join(map(str, angles_deg)) + "\n"
-
-        # -------- SEND --------
+        angles_deg = positions_rad_to_servo_deg(list(positions))
+        data = ' '.join(map(str, angles_deg)) + '\n'
         self.send_data(data)
-
-        # Debug
-        self.get_logger().info(f"Sent: {data.strip()}")
+        self.get_logger().debug(f'Sent: {data.strip()}')
 
 
 def main(args=None):
+    """Entry point for the `esp_bdg` (`esp_bridge`) ROS 2 node."""
     rclpy.init(args=args)
-
     node = ESPBridge()
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
+        if node.ser is not None:
+            try:
+                node.ser.close()
+            except Exception:
+                pass
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
-# #!/usr/bin/env python3
-
-# import rclpy
-# from rclpy.node import Node
-# from sensor_msgs.msg import JointState
-
-# import serial
-# import math
-
-
-# class JointStateToESP(Node):
-
-#     def __init__(self):
-#         super().__init__("jointstate_to_esp")
-
-#         # -------- SERIAL --------
-#         self.port = "/dev/ttyUSB0"
-#         self.baud = 115200
-#         self.connect_serial()
-
-#         # -------- SUBSCRIBE --------
-#         self.sub = self.create_subscription(
-#             JointState,
-#             "/joint_states",
-#             self.callback,
-#             10
-#         )
-
-#         self.get_logger().info("JointState → ESP Bridge (FINAL) Started")
-
-#         # -------- REQUIRED ORDER (VERY IMPORTANT) --------
-#         self.joint_order = [
-#             "NCCUP1_joint","NTHIGH1_joint","NFOOT1_joint",
-#             "NCCUP2_joint","NTHIGH2_joint","NFOOT2_joint",
-#             "NCCUP3_joint","NTHIGH3_joint","NFOOT3_joint",
-#             "NCCUP4_joint","NTHIGH4_joint","NFOOT4_joint",
-#             "NCCUP5_joint","NTHIGH5_joint","NFOOT5_joint",
-#             "NCCUP6_joint","NTHIGH6_joint","NFOOT6_joint"
-#         ]
-
-#     # -------- SERIAL --------
-#     def connect_serial(self):
-#         try:
-#             self.ser = serial.Serial(self.port, self.baud, timeout=1)
-#             self.get_logger().info(f"Connected to {self.port}")
-#         except Exception as e:
-#             self.get_logger().error(f"Serial failed: {e}")
-#             self.ser = None
-
-#     def send_data(self, data):
-#         if self.ser is None:
-#             self.connect_serial()
-#             return
-
-#         try:
-#             self.ser.write(data.encode())
-#         except Exception as e:
-#             self.get_logger().warn(f"Serial error: {e}")
-#             try:
-#                 self.ser.close()
-#             except:
-#                 pass
-#             self.ser = None
-
-#     # -------- CALLBACK --------
-#     def callback(self, msg):
-
-#         joint_map = dict(zip(msg.name, msg.position))
-
-#         angles_deg = []
-
-#         for i, joint in enumerate(self.joint_order):
-
-#             if joint not in joint_map:
-#                 self.get_logger().warn(f"{joint} missing!")
-#                 return
-
-#             angle_deg = math.degrees(joint_map[joint])
-
-#             # -------- YOUR OFFSET LOGIC --------
-#             if i % 3 == 0:      # J1
-#                 angle_deg += 45
-#             else:               # J2, J3
-#                 angle_deg += 90
-
-#             angle_deg = max(0.0, min(180.0, angle_deg))
-
-#             angles_deg.append(int(round(angle_deg)))
-
-#         data = " ".join(map(str, angles_deg)) + "\n"
-
-#         self.send_data(data)
-
-#         self.get_logger().info(f"Sent: {data.strip()}")
-
-
-# def main(args=None):
-#     rclpy.init(args=args)
-
-#     node = JointStateToESP()
-#     rclpy.spin(node)
-
-#     node.destroy_node()
-#     rclpy.shutdown()
-
-
-# if __name__ == "__main__":
-#     main()

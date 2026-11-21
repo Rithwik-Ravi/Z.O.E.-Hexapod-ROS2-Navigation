@@ -27,6 +27,8 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+from rover.sim_compat import get_dynamic_pythonpath
+
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory('rover')
@@ -77,9 +79,7 @@ def generate_launch_description():
     )
 
     # ── NVIDIA Brain Node (t=22s) ─────────────────────────────────────────────
-    import site
-    user_site = site.getusersitepackages()
-    pythonpath_val = f"{user_site}:/home/vishal/.local/lib/python3.12/site-packages:{os.environ.get('PYTHONPATH', '')}"
+    pythonpath_val = get_dynamic_pythonpath()
 
     brain_node = Node(
         package='rover',

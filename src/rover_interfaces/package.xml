@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>rover_interfaces</name>
-  <version>0.0.0</version>
-  <description>Custom ROS2 service interfaces for the autonomous hexapod brain</description>
-  <maintainer email="vishal@todo.todo">vishal</maintainer>
-  <license>Apache-2.0</license>
+  <version>1.0.0</version>
+  <description>Custom ROS 2 service interfaces for the Z.O.E. autonomous hexapod brain</description>
+  <maintainer email="mailrittyplay@gmail.com">Rithwik-Ravi</maintainer>
+  <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>rosidl_default_generators</buildtool_depend>

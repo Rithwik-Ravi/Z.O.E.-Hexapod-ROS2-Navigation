@@ -31,10 +31,14 @@ from launch_ros.events.lifecycle import ChangeState
 from lifecycle_msgs.msg import Transition
 from nav2_common.launch import RewrittenYaml
 
+from rover.sim_compat import prepare_nav2_params
+
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory('rover')
-    nav2_params_default = os.path.join(pkg_dir, 'config', 'nav2_real_params.yaml')
+    nav2_params_default = prepare_nav2_params(
+        os.path.join(pkg_dir, 'config', 'nav2_real_params.yaml')
+    )
     slam_params_default = os.path.join(pkg_dir, 'config', 'slam_toolbox_real_params.yaml')
     urdf_path = os.path.join(pkg_dir, 'urdf', 'hexa.urdf')
     rviz_config_path = os.path.join(pkg_dir, 'config', 'nav2.rviz')

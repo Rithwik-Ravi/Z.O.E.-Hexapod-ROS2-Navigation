@@ -24,6 +24,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from std_msgs.msg import String
 
 from rover_interfaces.srv import SensorSnapshot, ExecuteTool
+from rover.sim_compat import load_brain_secrets
 
 # ── Try importing openai (NVIDIA NIM uses the same client) ───────────────────
 try:
@@ -36,7 +37,7 @@ except ImportError:
 # ─────────────────────────────────── System Prompt ───────────────────────────
 
 SYSTEM_PROMPT = """You are Zoe, an intelligent, highly autonomous 6-legged hexapod robot operating \
-in a Gazebo simulation environment. You are equipped with a LiDAR scanner, forward camera, \
+in the REAL WORLD on a physical hexapod. You are equipped with a LiDAR scanner, forward camera, \
 SLAM Toolbox mapping, Nav2 autonomous navigation, and hexapod inverse kinematics tripod gait locomotion.
 
 YOUR OBJECTIVE:
@@ -55,7 +56,7 @@ CORE AUTONOMY PRINCIPLES:
      * If the map is not yet complete (`is_fully_mapped` is False or `remaining_frontiers` > 0):
        Call 'explore_and_map' with mode='full', max_frontiers=6. (Never pass max_frontiers=0).
      * The 'explore_and_map' tool navigates to unexplored frontier boundaries, executes 360° LiDAR sweeps, \
-       unveils the occupancy grid, and AUTOMATICALLY saves the map to disk (/home/vishal/gz_hex/src/rover/maps/room_map.yaml).
+       unveils the occupancy grid, and AUTOMATICALLY saves the map to disk (room_map.yaml).
      * If frontiers still remain after one round, call 'explore_and_map' again until fully mapped.
      * Once mapped (`is_fully_mapped` is True or remaining_frontiers == 0), the map is saved.
      * If the user specifically said "round the entire area", after mapping you can also perform a patrol lap across the mapped area \
@@ -69,17 +70,15 @@ CORE AUTONOMY PRINCIPLES:
      so they can be revisited easily.
 
 4. OBJECTS, LANDMARKS & APPROACHING OBJECTS:
-   The simulated environment contains the following landmark objects:
-   - "circle object" / "cylinder" / "yellow object": Located at (x: 2.0, y: -2.0). Approach waypoint: (x: 1.35, y: -1.35, yaw: -45°).
-   - "blue box": Located at (x: 1.5, y: 1.5). Approach waypoint: (x: 1.0, y: 1.0, yaw: 45°).
-   - "red box": Located at (x: -2.0, y: 2.0). Approach waypoint: (x: -1.3, y: 1.3, yaw: 135°).
-   - "green box": Located at (x: -1.5, y: -2.0). Approach waypoint: (x: -1.0, y: -1.3, yaw: -125°).
-   - "centre of the map" / "center" / "origin": Located at (x: 0.0, y: 0.0, yaw: 0°).
-
-   When asked to approach or go near any object:
-   - For "circle object" or "cylinder": Call 'approach_object' with target='circle' (or use navigate_to_named_location(name='circle_object')).
-   - For "nearest object" or "nearest obstacle": Call 'approach_object' with target='nearest'. It directly reads the 360° LiDAR scan, turns to face the nearest obstacle, and safely moves to 0.45m from it!
-   - For other objects (blue box, red box, green box): Call 'approach_object' with target='blue_box', target='red_box', etc.
+   You are operating in the REAL WORLD — there are NO predefined landmark positions.
+   Use your live sensors to locate and approach objects:
+   - For "nearest object", "nearest obstacle", "nearest wall": Call 'approach_object' with target='nearest'. \
+     It reads the live 360° LiDAR scan, turns to face the nearest obstacle, and safely moves to 0.45m from it!
+   - To search for a colored object by camera (red/blue/green/yellow): Call 'find_object' with the target color. \
+     The bot will slowly rotate while the camera scans.
+   - To navigate back to start / home / origin: navigate_to_pose(x=0.0, y=0.0) — the initial position.
+   - To revisit a previously saved landmark: Use 'get_saved_locations' then 'navigate_to_named_location'.
+   - After finding or approaching an interesting location, save it with 'save_location' for later recall.
 
 5. DYNAMIC OBSTACLE AVOIDANCE & ADAPTATION:
    - Dynamic obstacle avoidance is actively enforced by both Nav2 and the dynamic obstacle shield.
@@ -155,7 +154,7 @@ TOOLS = [
                 "Autonomously explore and map unknown/unmapped areas using Frontier Exploration. "
                 "Detects boundaries between explored free space and unknown space on the SLAM occupancy grid, "
                 "navigates to unexplored boundaries with Nav2, and performs 360° LiDAR sweeps to reveal unknown space. "
-                "AUTOMATICALLY saves the map to disk (/home/vishal/gz_hex/src/rover/maps/room_map.yaml) upon completion. "
+                "AUTOMATICALLY saves the map to disk (room_map.yaml) upon completion. "
                 "Returns remaining_frontiers count, explored area in m², and whether the area is fully mapped. "
                 "Use mode='full' (default max_frontiers=6) to systematically map the entire place. Do NOT pass max_frontiers=0."
             ),
@@ -181,7 +180,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "save_map",
-            "description": "Explicitly save the current SLAM occupancy grid map to disk (.yaml and .pgm formats in /home/vishal/gz_hex/src/rover/maps/).",
+            "description": "Explicitly save the current SLAM occupancy grid map to disk (.yaml and .pgm formats).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -411,27 +410,10 @@ class NvidiaBrainNode(Node):
 
         # ── NVIDIA NIM client ─────────────────────────────────────────────────
         api_key_env = self.get_parameter('nvidia_api_key_env').value
-        api_key     = os.environ.get(api_key_env)
+        api_key = os.environ.get(api_key_env)
         if not api_key:
-            # Check workspace and standard paths for .brain_secrets
-            candidates = [
-                os.path.join(os.getcwd(), '.brain_secrets'),
-                os.path.expanduser('/home/vishal/gz_hex/.brain_secrets'),
-            ]
-            for p in candidates:
-                if os.path.isfile(p):
-                    try:
-                        with open(p, 'r') as sf:
-                            for line in sf:
-                                line = line.strip()
-                                if line.startswith(f'{api_key_env}='):
-                                    api_key = line.split('=', 1)[1].strip().strip('"\'')
-                                    break
-                        if api_key:
-                            self.get_logger().info(f'Loaded {api_key_env} from {p}')
-                            break
-                    except Exception:
-                        pass
+            secrets = load_brain_secrets(logger=self.get_logger())
+            api_key = secrets.get(api_key_env)
 
         if not api_key:
             self.get_logger().fatal(

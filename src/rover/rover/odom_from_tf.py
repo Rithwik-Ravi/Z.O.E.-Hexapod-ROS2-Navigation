@@ -1,29 +1,57 @@
 #!/usr/bin/env python3
 """
-odom_from_tf.py
-Publishes a nav_msgs/Odometry message on /odom by reading TF.
-When hardware wheel encoders are absent on a real hexapod, reads
-map -> base_footprint (or odom -> base_footprint) from SLAM / TF tree
-and computes linear/angular velocities dynamically so Nav2 costmaps
-and controllers receive reliable dynamic motion feedback.
+odom_from_tf.py — Dynamic TF-derived Odometry Publisher for Legged Hardware.
+
+When wheel encoders are unavailable on the physical hexapod, SLAM Toolbox
+publishes `map -> base_footprint` via 2D LiDAR scan matching while a static
+identity transform links `odom -> base_footprint`. This node samples
+`map -> base_footprint` (falling back to `odom -> base_footprint`), computes
+pose derivatives, rotates linear velocity into the `base_footprint` body frame
+(per ROS REP-103 `nav_msgs/Odometry` twist semantics), and publishes `/odom`.
 """
 
 import math
 import rclpy
-from rclpy.node import Node
-from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
 import tf2_ros
 
 
-def yaw_from_quaternion(q):
-    """Extract yaw angle from quaternion."""
+def yaw_from_quaternion(q) -> float:
+    """Extract planar yaw angle (radians) from a geometry_msgs Quaternion."""
     siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
     cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
     return math.atan2(siny_cosp, cosy_cosp)
 
 
+def world_vel_to_body(dx_dt: float, dy_dt: float, yaw: float):
+    """
+    Rotate world-frame linear velocity `(dx/dt, dy/dt)` into the robot body frame.
+
+    Args:
+        dx_dt: World-frame X velocity (m/s).
+        dy_dt: World-frame Y velocity (m/s).
+        yaw: Robot heading in the parent frame (radians).
+
+    Returns:
+        Tuple `(vx_body, vy_body)` in the `base_footprint` frame (m/s).
+    """
+    cos_y = math.cos(yaw)
+    sin_y = math.sin(yaw)
+    vx_body = dx_dt * cos_y + dy_dt * sin_y
+    vy_body = -dx_dt * sin_y + dy_dt * cos_y
+    return vx_body, vy_body
+
+
+def normalize_angle(angle: float) -> float:
+    """Wrap an angle in radians to `[-pi, pi]`."""
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+
 class OdomFromTF(Node):
+    """Publishes `nav_msgs/Odometry` on `/odom` by differentiating TF poses."""
+
     def __init__(self):
         super().__init__('odom_from_tf')
 
@@ -39,7 +67,7 @@ class OdomFromTF(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.pub = self.create_publisher(Odometry, '/odom', 10)
-        self.timer = self.create_timer(1.0 / rate, self.publish_odom)
+        self.timer = self.create_timer(1.0 / max(1.0, rate), self.publish_odom)
 
         self.last_x = None
         self.last_y = None
@@ -51,10 +79,11 @@ class OdomFromTF(Node):
         )
 
     def publish_odom(self):
-        tf: TransformStamped = None
+        """Sample latest TF transform and publish Odometry with body-frame twist."""
+        tf_msg: TransformStamped = None
         for parent_frame in ['map', self.odom_frame]:
             try:
-                tf = self.tf_buffer.lookup_transform(
+                tf_msg = self.tf_buffer.lookup_transform(
                     parent_frame,
                     self.base_frame,
                     rclpy.time.Time()
@@ -65,16 +94,16 @@ class OdomFromTF(Node):
                     tf2_ros.ExtrapolationException):
                 continue
 
-        if tf is None:
+        if tf_msg is None:
             return
 
         current_time = self.get_clock().now()
-        stamp_sec = tf.header.stamp.sec + tf.header.stamp.nanosec * 1e-9
+        stamp_sec = tf_msg.header.stamp.sec + tf_msg.header.stamp.nanosec * 1e-9
 
-        x = tf.transform.translation.x
-        y = tf.transform.translation.y
-        z = tf.transform.translation.z
-        q = tf.transform.rotation
+        x = tf_msg.transform.translation.x
+        y = tf_msg.transform.translation.y
+        z = tf_msg.transform.translation.z
+        q = tf_msg.transform.rotation
         yaw = yaw_from_quaternion(q)
 
         vx = 0.0
@@ -84,17 +113,12 @@ class OdomFromTF(Node):
         if self.last_time is not None:
             dt = stamp_sec - self.last_time
             if 0.001 < dt < 1.0:
-                dx = x - self.last_x
-                dy = y - self.last_y
-                dyaw = yaw - self.last_yaw
+                dx_dt = (x - self.last_x) / dt
+                dy_dt = (y - self.last_y) / dt
+                dyaw = normalize_angle(yaw - self.last_yaw)
 
-                while dyaw > math.pi:
-                    dyaw -= 2.0 * math.pi
-                while dyaw < -math.pi:
-                    dyaw += 2.0 * math.pi
-
-                vx = dx / dt
-                vy = dy / dt
+                # Rotate world velocity into child_frame_id (base_footprint)
+                vx, vy = world_vel_to_body(dx_dt, dy_dt, yaw)
                 wz = dyaw / dt
 
         self.last_x = x
@@ -116,21 +140,23 @@ class OdomFromTF(Node):
         odom.twist.twist.linear.y = vy
         odom.twist.twist.angular.z = wz
 
-        # Covariance reflects lidar-SLAM uncertainty on a hexapod with no wheel encoders.
-        # x/y: ~0.1 (10 cm), yaw: ~0.05 rad — realistic SLAM drift values.
-        # Tight (1e-3) values caused Nav2 to over-trust poses and issue erratic replans.
-        pose_cov = [0.10, 0.0, 0.0, 0.0, 0.0, 0.0,
-                    0.0, 0.10, 0.0, 0.0, 0.0, 0.0,
-                    0.0, 0.0,  1e6, 0.0, 0.0, 0.0,
-                    0.0, 0.0,  0.0, 1e6, 0.0, 0.0,
-                    0.0, 0.0,  0.0, 0.0, 1e6, 0.0,
-                    0.0, 0.0,  0.0, 0.0, 0.0, 0.05]
-        twist_cov = [0.05, 0.0, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.05, 0.0, 0.0, 0.0, 0.0,
-                     0.0, 0.0,  1e6, 0.0, 0.0, 0.0,
-                     0.0, 0.0,  0.0, 1e6, 0.0, 0.0,
-                     0.0, 0.0,  0.0, 0.0, 1e6, 0.0,
-                     0.0, 0.0,  0.0, 0.0, 0.0, 0.05]
+        # Reflects LiDAR-SLAM uncertainty without wheel encoders (~10 cm, 0.05 rad)
+        pose_cov = [
+            0.10, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.10, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1e6, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 1e6, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1e6, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.05,
+        ]
+        twist_cov = [
+            0.05, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.05, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1e6, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 1e6, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1e6, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.05,
+        ]
         odom.pose.covariance = pose_cov
         odom.twist.covariance = twist_cov
 
@@ -138,6 +164,7 @@ class OdomFromTF(Node):
 
 
 def main(args=None):
+    """Entry point for the `odom_from_tf` ROS 2 node."""
     rclpy.init(args=args)
     node = OdomFromTF()
     try:

@@ -41,6 +41,7 @@ from action_msgs.msg import GoalStatus
 
 from rover_interfaces.srv import ExecuteTool, SensorSnapshot
 from rover.frontier_exploration import FrontierExploration
+from rover.sim_compat import get_maps_dir
 
 # ── Predefined waypoints: {name: [x, y, yaw_deg]} ───────────────────────────
 DEFAULT_WAYPOINTS = {
@@ -666,7 +667,7 @@ class ToolDispatcherNode(Node):
     def _save_map(self, map_name: str = 'room_map') -> dict:
         """
         Saves current OccupancyGrid /map to standard Nav2 PGM + YAML formats.
-        Destination: /home/vishal/gz_hex/src/rover/maps/{map_name}.yaml and .pgm
+        Destination: `<maps_dir>/{map_name}.yaml` and `.pgm`
         """
         with self._map_lock:
             current_map = self._latest_map
@@ -676,7 +677,7 @@ class ToolDispatcherNode(Node):
             return {'saved': False, 'error': 'No map received yet'}
 
         try:
-            maps_dir = '/home/vishal/gz_hex/src/rover/maps'
+            maps_dir = get_maps_dir()
             os.makedirs(maps_dir, exist_ok=True)
 
             width = current_map.info.width

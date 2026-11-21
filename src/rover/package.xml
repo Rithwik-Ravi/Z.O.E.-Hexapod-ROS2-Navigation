@@ -2,10 +2,10 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>rover</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="aanimesh@todo.todo">aanimesh</maintainer>
-  <license>TODO: License declaration</license>
+  <version>1.0.0</version>
+  <description>Z.O.E. 18-DOF Hexapod ROS 2 navigation, SLAM, Gazebo simulation, AI brain, and RL policy bridge package</description>
+  <maintainer email="mailrittyplay@gmail.com">Rithwik-Ravi</maintainer>
+  <license>BSD-3-Clause</license>
 
   <depend>rclpy</depend>
   <depend>rover_interfaces</depend>
@@ -18,6 +18,10 @@
   <depend>tf2_geometry_msgs</depend>
   <depend>cv_bridge</depend>
 
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>joint_state_publisher_gui</exec_depend>
   <exec_depend>rviz2</exec_depend>

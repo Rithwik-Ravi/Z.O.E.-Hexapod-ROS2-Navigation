@@ -35,6 +35,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 
 from rover_interfaces.srv import SensorSnapshot
 from rover.frontier_exploration import FrontierExploration
+from rover.sim_compat import get_maps_dir
 
 # ── Color detection ranges (HSV) ──────────────────────────────────────────────
 COLOR_RANGES = {
@@ -286,7 +287,7 @@ class SensorBridgeNode(Node):
             pos = self._amcl_pose if self._amcl_pose else self._position
 
             # Check if saved map exists on disk
-            saved_map_file = '/home/vishal/gz_hex/src/rover/maps/room_map.yaml'
+            saved_map_file = os.path.join(get_maps_dir(), 'room_map.yaml')
             map_saved = os.path.isfile(saved_map_file)
 
             # Dynamic obstacle detection (< 0.45m)
